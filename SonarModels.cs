@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace LoupixDeck.Plugin.SteelseriesSonar;
 
@@ -95,6 +96,40 @@ public sealed class SonarStreamRedirection
 
     public bool IsRoleEnabled(string role) =>
         Status?.FirstOrDefault(s => s.Role == role)?.IsEnabled ?? false;
+}
+
+/// <summary>One physical audio device, as returned by <c>/audioDevices</c>.</summary>
+public sealed class SonarAudioDevice
+{
+    /// <summary>Windows endpoint id, e.g. <c>{0.0.0.00000000}.{guid}</c>.</summary>
+    public string Id { get; init; } = string.Empty;
+
+    public string FriendlyName { get; init; } = string.Empty;
+
+    /// <summary><c>active</c> for a usable device. Absent on older Sonar builds.</summary>
+    public string? State { get; init; }
+
+    public bool IsActive => State == null || State == "active";
+
+    /// <summary>
+    /// The name without the Windows endpoint prefix: <c>Lautsprecher (2- FiiO K11)</c> becomes
+    /// <c>FiiO K11</c>. The full name is too long for a button.
+    /// </summary>
+    public string ShortName
+    {
+        get
+        {
+            string name = FriendlyName;
+            int open = name.IndexOf('(');
+            if (open >= 0 && name.EndsWith(')'))
+            {
+                name = name[(open + 1)..^1];
+            }
+
+            Match numbered = Regex.Match(name, @"^\d+-\s*");
+            return numbered.Success ? name[numbered.Length..] : name;
+        }
+    }
 }
 
 /// <summary>Metadata of one SteelSeries GG sub-application, from <c>/subApps</c>.</summary>

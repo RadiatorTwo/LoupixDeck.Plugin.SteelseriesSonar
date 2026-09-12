@@ -20,6 +20,9 @@ public sealed class SonarState
         new Dictionary<string, SonarStreamRedirection>();
     public IReadOnlyList<SonarConfig> Configs { get; init; } = [];
 
+    /// <summary>Physical playback devices a stream mix can be sent to.</summary>
+    public IReadOnlyList<SonarAudioDevice> OutputDevices { get; init; } = [];
+
     /// <summary>The active preset per channel role.</summary>
     public IReadOnlyDictionary<string, SonarConfig> SelectedConfigs { get; init; } =
         new Dictionary<string, SonarConfig>();
@@ -117,6 +120,49 @@ public sealed class SonarStateMonitor : IDisposable
                redirection.IsRoleEnabled(role);
     }
 
+    /// <summary>The physical device a stream mix is currently sent to, or null when unknown.</summary>
+    public SonarAudioDevice? GetOutputDevice(SonarMix mix)
+    {
+        SonarState state = _state;
+        string? id = SonarChannels.RedirectionId(mix);
+        if (id == null || !state.Redirections.TryGetValue(id, out SonarStreamRedirection? redirection))
+        {
+            return null;
+        }
+
+        return state.OutputDevices.FirstOrDefault(d => d.Id == redirection.DeviceId);
+    }
+
+    /// <summary>
+    /// Takes over a redirection Sonar just returned from a write, so the button shows the new
+    /// device at once instead of after the next slow refresh.
+    /// </summary>
+    public void ApplyRedirection(SonarStreamRedirection redirection)
+    {
+        SonarState state = _state;
+        if (!state.IsConnected || string.IsNullOrEmpty(redirection.Id))
+        {
+            return;
+        }
+
+        Dictionary<string, SonarStreamRedirection> redirections = new(state.Redirections)
+        {
+            [redirection.Id] = redirection
+        };
+
+        Publish(new SonarState
+        {
+            IsConnected = state.IsConnected,
+            IsStreamMode = state.IsStreamMode,
+            Volumes = state.Volumes,
+            MonitoringEnabled = state.MonitoringEnabled,
+            Redirections = redirections,
+            Configs = state.Configs,
+            OutputDevices = state.OutputDevices,
+            SelectedConfigs = state.SelectedConfigs
+        });
+    }
+
     /// <summary>
     /// Records a value we just wrote ourselves, so the button reflects the press immediately
     /// instead of lagging until the next poll.
@@ -194,6 +240,7 @@ public sealed class SonarStateMonitor : IDisposable
         IReadOnlyDictionary<string, SonarStreamRedirection> redirections = previous.Redirections;
         IReadOnlyList<SonarConfig> configs = previous.Configs;
         IReadOnlyDictionary<string, SonarConfig> selectedConfigs = previous.SelectedConfigs;
+        IReadOnlyList<SonarAudioDevice> outputDevices = previous.OutputDevices;
 
         if (refreshSlowData)
         {
@@ -224,6 +271,12 @@ public sealed class SonarStateMonitor : IDisposable
                     .GroupBy(c => c.VirtualAudioDevice)
                     .ToDictionary(g => g.Key, g => g.First());
             }
+
+            List<SonarAudioDevice>? fetchedDevices = await _client.GetOutputDevicesAsync(ct).ConfigureAwait(false);
+            if (fetchedDevices != null)
+            {
+                outputDevices = fetchedDevices;
+            }
         }
 
         Publish(new SonarState
@@ -234,6 +287,7 @@ public sealed class SonarStateMonitor : IDisposable
             MonitoringEnabled = monitoringEnabled,
             Redirections = redirections,
             Configs = configs,
+            OutputDevices = outputDevices,
             SelectedConfigs = selectedConfigs
         });
     }
@@ -292,6 +346,8 @@ public sealed class SonarStateMonitor : IDisposable
                 {
                     builder.Append(redirection.IsRoleEnabled(channel.Role) ? '1' : '0');
                 }
+
+                builder.Append(redirection.DeviceId);
             }
 
             builder.Append('|');
@@ -300,6 +356,11 @@ public sealed class SonarStateMonitor : IDisposable
         foreach (KeyValuePair<string, SonarConfig> entry in state.SelectedConfigs.OrderBy(e => e.Key, StringComparer.Ordinal))
         {
             builder.Append(entry.Key).Append('=').Append(entry.Value.Id).Append(',');
+        }
+
+        foreach (SonarAudioDevice device in state.OutputDevices)
+        {
+            builder.Append('|').Append(device.Id).Append('=').Append(device.FriendlyName);
         }
 
         return builder.ToString();

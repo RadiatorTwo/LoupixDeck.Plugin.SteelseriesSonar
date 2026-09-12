@@ -110,6 +110,80 @@ public sealed class SonarStreamMonitoringToggleCommand(SonarContext context)
 }
 
 /// <summary>
+/// Sends a stream mix to the next physical playback device, wrapping around after the last one.
+/// For the monitoring mix this is the device you hear your personal mix on.
+/// </summary>
+public sealed class SonarNextOutputDeviceCommand : SonarCommandBase, IDisplayCommand
+{
+    private readonly SonarMix _mix;
+
+    public SonarNextOutputDeviceCommand(SonarContext context, SonarMix mix)
+        : base(context)
+    {
+        _mix = mix;
+
+        Descriptor = new CommandDescriptor
+        {
+            CommandName = $"SteelseriesSonar.{mix}.NextOutputDevice",
+            DisplayName = $"Sonar: {SonarChannels.DisplayName(mix)} Next Output Device",
+            Group = GroupName,
+            Description = $"Send the {SonarChannels.DisplayName(mix)} mix to the next output device",
+            HiddenFromMenu = true
+        };
+    }
+
+    public override CommandDescriptor Descriptor { get; }
+
+    public TimeSpan UpdateInterval => TimeSpan.FromSeconds(1);
+
+    public string GetText(CommandContext ctx)
+    {
+        if (!Context.Monitor.State.IsConnected)
+        {
+            return "Sonar\noffline";
+        }
+
+        return $"{SonarChannels.DisplayName(_mix)}\n{Context.Monitor.GetOutputDevice(_mix)?.ShortName ?? "--"}";
+    }
+
+    protected override async Task ExecuteCore(CommandContext ctx, CancellationToken ct)
+    {
+        // Read both lists fresh: devices come and go, and the poll only refreshes them slowly.
+        List<SonarAudioDevice>? devices = await Context.Client.GetOutputDevicesAsync(ct).ConfigureAwait(false);
+        List<SonarStreamRedirection>? redirections =
+            await Context.Client.GetStreamRedirectionsAsync(ct).ConfigureAwait(false);
+
+        List<SonarAudioDevice> active = devices?.Where(d => d.IsActive && d.Id.Length > 0).ToList() ?? [];
+        if (active.Count == 0)
+        {
+            Context.Logger?.Info("Sonar: no output device to switch to.");
+            return;
+        }
+
+        string? redirectionId = SonarChannels.RedirectionId(_mix);
+        string? currentId = redirections?.FirstOrDefault(r => r.Id == redirectionId)?.DeviceId;
+
+        // An unknown current device (index -1) starts over at the first one.
+        int index = active.FindIndex(d => d.Id == currentId);
+        SonarAudioDevice next = active[(index + 1) % active.Count];
+        if (next.Id == currentId)
+        {
+            return;
+        }
+
+        SonarStreamRedirection? updated =
+            await Context.Client.SetRedirectionDeviceAsync(_mix, next.Id, ct).ConfigureAwait(false);
+        if (updated == null)
+        {
+            return;
+        }
+
+        Context.Monitor.ApplyRedirection(updated);
+        ShowRotaryOverlay(ctx, next.ShortName);
+    }
+}
+
+/// <summary>
 /// Routes one channel into or out of the streaming or the monitoring mix. This is what decides
 /// whether your viewers hear a channel at all, independently of its volume.
 /// </summary>

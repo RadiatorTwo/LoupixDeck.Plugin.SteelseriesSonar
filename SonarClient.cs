@@ -88,6 +88,42 @@ public sealed class SonarClient(IPluginLogger? logger) : IDisposable
             $"/streamRedirections/{redirectionId}/redirections/{role}/isEnabled/{FormatBool(enabled)}", ct);
     }
 
+    // ---- Output devices -------------------------------------------------------------------
+
+    /// <summary>Physical playback devices, without Sonar's own virtual devices.</summary>
+    public Task<List<SonarAudioDevice>?> GetOutputDevicesAsync(CancellationToken ct) =>
+        GetAsync<List<SonarAudioDevice>>("/audioDevices?deviceDataFlow=render&removeSteelSeriesVAD=true", ct);
+
+    /// <summary>
+    /// Sends a stream mix to another physical device. The device id contains braces and dots and
+    /// must be escaped. Returns the updated redirection, or null when the call failed.
+    /// </summary>
+    public async Task<SonarStreamRedirection?> SetRedirectionDeviceAsync(SonarMix mix, string deviceId, CancellationToken ct)
+    {
+        string? redirectionId = SonarChannels.RedirectionId(mix);
+        if (redirectionId == null)
+        {
+            return null;
+        }
+
+        string path = $"/streamRedirections/{redirectionId}/deviceId/{Uri.EscapeDataString(deviceId)}";
+        SonarResponse? response = await SendAsync(HttpMethod.Put, path, ct).ConfigureAwait(false);
+        if (response is not { Success: true, Body.Length: > 0 })
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<SonarStreamRedirection>(response.Body, SonarJson.Options);
+        }
+        catch (JsonException ex)
+        {
+            logger?.Warn($"Sonar: unexpected response for PUT {path} ({ex.Message}).");
+            return null;
+        }
+    }
+
     // ---- Formatting -----------------------------------------------------------------------
 
     /// <summary>

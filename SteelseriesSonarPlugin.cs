@@ -121,6 +121,10 @@ public sealed class SteelseriesSonarPlugin : LoupixPlugin, IPluginSettingsPage, 
         Add(new SonarModeCommand(context, targetStreamMode: false));
         Add(new SonarStreamMonitoringToggleCommand(context));
 
+        // Monitoring only: the streaming mix goes to Sonar's virtual stream device, which the
+        // device list deliberately leaves out, so cycling it would break the stream.
+        _commands.Add(new SonarNextOutputDeviceCommand(context, SonarMix.Monitoring));
+
         _commands.Add(new SonarSelectConfigCommand(context));
 
         void Add<T>(T command) where T : IPluginCommand, ISonarStatefulCommand
@@ -222,8 +226,9 @@ public sealed class SteelseriesSonarPlugin : LoupixPlugin, IPluginSettingsPage, 
         categories.Add(new MenuNode
         {
             Name = "Streamer Mode",
-            Children = SonarChannels.All
-                .Select(channel => new MenuNode
+            Children =
+            [
+                .. SonarChannels.All.Select(channel => new MenuNode
                 {
                     Name = channel.DisplayName,
                     Children =
@@ -231,8 +236,9 @@ public sealed class SteelseriesSonarPlugin : LoupixPlugin, IPluginSettingsPage, 
                         .. MixActions(SonarMix.Streaming, channel, "Streaming", withRotary),
                         .. MixActions(SonarMix.Monitoring, channel, "Monitoring", withRotary)
                     ]
-                })
-                .ToList()
+                }),
+                Leaf("Monitoring Next Output Device", "SteelseriesSonar.Monitoring.NextOutputDevice")
+            ]
         });
 
         IReadOnlyList<MenuNode> roots =
