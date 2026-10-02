@@ -35,8 +35,20 @@ public sealed class SteelseriesSonarPlugin : LoupixPlugin, IPluginSettingsPage, 
         SdkVersion = new Version(1, 21, 0),
         Author = "RadiatorTwo",
         Description = "Control the SteelSeries Sonar mixer, including the separate streaming and " +
-                      "monitoring volumes of stream mode."
+                      "monitoring volumes of stream mode.",
+        Icon = LoadIcon()
     };
+
+    /// <summary>The plugin icon (icon.png, embedded). Missing data only costs the icon.</summary>
+    private static byte[]? LoadIcon()
+    {
+        using Stream? stream = typeof(SteelseriesSonarPlugin).Assembly.GetManifestResourceStream("LoupixDeck.Plugin.SteelseriesSonar.icon.png");
+        if (stream == null) return null;
+
+        using MemoryStream buffer = new();
+        stream.CopyTo(buffer);
+        return buffer.ToArray();
+    }
 
     public override void Initialize(IPluginHost host)
     {
